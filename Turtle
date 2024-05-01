@@ -1,66 +1,198 @@
-turte = read.csv("Satellite Tracking of Oceanic Loggerhead Turtles in the Mediterranean.csv")
-head(turte)
-dim(turte)
+dataset = read.csv("Satellite Tracking of Oceanic Loggerhead Turtles in the Mediterranean.csv")
+head(dataset)
+turtle = dataset[,c(3:5)]
+head(turtle)
+dim(turtle)
+library(ggplot2)
+library(Directional)
 library(circular)
 library(CircStats)
+require(sf)
+require(tidyverse)
+require(lubridate)
+require(oce)
+require(gganimate)
+require(RColorBrewer)
+require(rerddap)
 
-watson.test(turte$location.long, alpha = 0.01, dist = "vonmises")
-watson.test(turte$location.lat, alpha = 0.01, dist = "vonmises")
-library(ggplot2)
-options(rgl.useNULL = TRUE)
+library(circular)
 library(Directional)
+library(CircStats)
+library(ggplot2)
+library(solarPos)
+library(maps)
+library(ggOceanMaps)
+library(maps)
+world_coordinates = map_data("world")
+northern_map <- subset(world_coordinates, long >-20)
+northern_map1 <- subset(northern_map , long <20)
+northern_map2 <- subset(northern_map1 , lat >= 0)
+northern_map7 <- subset(northern_map2 , lat <= 70)
+
 library(movMF)
 
-dd = cbind(turte$location.lat, turte$location.long)
+vmf_density_grid = 
+  function(u, ngrid = 100) {
+    # Translate to (0,180) and (0,360)
+    u[,1] <- u[,1] + 90
+    u[,2] <- u[,2] + 180
+    res <- vmf.kerncontour(u, thumb = "none", den.ret = T, full = T,
+                           ngrid = ngrid)
+    
+    # Translate back to (-90, 90) and (-180, 180) and create a grid of
+    # coordinates
+    ret <- expand.grid(Lat = res$lat - 90, Long = res$long - 180)
+    ret$Density <- c(res$den)
+    ret
+  }
 
+kocchop = cbind(turtle$location.lat , turtle$location.long)
+set.seed(2022)
+EvMFs <- 
+  function(K){
+    movMF(kocchop, k = K, control= list(nruns = 20))
+  }
 
-Evmf <- function(K){
-  movMF(dd, k= K, control = list(nruns = 20))
-}
-
-set.seed(123)
-Esd = lapply(1:10, Evmf)
+Esd = lapply(1:10, EvMFs)
+gt = sapply(Esd, BIC)
+gt
 Esd
-sapply(Esd, BIC)
 
-library(ggOceanMaps)
+turtle.densities <- vmf_density_grid(kocchop, ngrid = 300)
 
-dt <- data.frame(lon = turte$location.long,
-                 lat = turte$location.lat)
+kocchop1 <- kocchop[sample(nrow(kocchop), 100), ]
+dim(kocchop1)
 
-plot <- 
-  basemap(data = dt, bathymetry = T, land.col = "green4") + 
-  geom_point(data = transform_coord(dt), aes(x = lon, y = lat), 
-             color = "red", fill = NA, size = 0.5)
-plot
+turtle.densities_1 <- vmf_density_grid(kocchop1, ngrid = 300)
 
-vmf_density_grid = function(u, ngrid = 100){
-  u[,1] <- u[,1] + 90
-  u[,2] <- u[,2] +180
-  res <- vmf.kerncontour(u, thumb = "none", den.ret = T, full = T,
-                         ngrid = ngrid)
-  ret <- expand.grid(Lat = res$lat - 90, Long = res$long - 180)
-  ret$Density <- c(res$den)
-  ret
+world <- map_data("world")
+
+kocchop.plots <- ggplot() +
+  geom_map(data = world, map = world,
+           mapping = aes(map_id = region),
+           color = "grey90", fill = "green4") +
+  geom_point(data = turtle,
+             mapping = aes(x = location.long, y = location.lat),
+             color = "red", alpha = .5, size = .5, stroke = 0.1) +
+  geom_contour(data = turtle.densities_1, aes(x=Long, y=Lat, z=Density),
+               color = "blue") +
+  coord_map("mercator")
+
+kocchop.plots
+
+kocchop.plot <- ggplot() +
+  geom_map(data = world, map = world,
+           mapping = aes(map_id = region),
+           color = "grey90", fill = "green4") +
+  geom_point(data = turtle,
+             mapping = aes(x = location.long, y = location.lat),
+             color = "red", alpha = .5, size = .5, stroke = 0.1) +
+  geom_contour(data = turtle.densities, aes(x=Long, y=Lat, z=Density),
+               color = "blue") +
+  coord_map("mercator")
+
+kocchop.plot
+
+turtle$timestamp <- as.Date(turtle$timestamp)
+
+turtle$year = format(turtle$timestamp, "%Y")
+turtle$year = as.numeric(turtle$year)
+
+# Convert the date string to a POSIXlt object
+date_obj <- as.POSIXlt(turtle$timestamp)
+
+# Extract the day of the year
+turtle$yearly_day <- date_obj$yday + 1
+
+
+turtle$yearly_date = turtle$yearly_day/365
+turtle$year = as.numeric(turtle$year)
+turtle$Annualized_time = (turtle$year + turtle$yearly_date)
+
+turtle$Annualized_time
+turtle$height = 0
+library(wmm)
+
+head(turtle)
+summary(turtle)
+dim(turtle)
+
+?GetMagneticFieldWMM
+mag = list()
+for (i in 1:10271) {
+  mag[[i]] = data.frame(GetMagneticFieldWMM(lon = turtle$location.long[i], 
+                                            lat =  turtle$location.lat[i], 
+                                            height =  turtle$height[i], 
+                                            time =  turtle$Annualized_time[i], 
+                                            wmmVersion = "WMM2015"))
 }
 
-turtle.dens = vmf_density_grid(dd, ngrid = 300)
+mage_data = data.frame(t(sapply(mag,c)))
+head(mage_data)
+magnetic_dta = mage_data[,c(1:3, 7:10)]
+head(magnetic_dta)
 
-basemap(data = dt, bathymetry = T, land.col = "green4") +
-  geom_point(data = turte,
-             mapping = aes(x = location.long, y = location.lat),
-             color = "red", alpha = 1, size = 1 , stroke = 0.1) +
-  geom_density_2d(data = turte,
-                  aes(x = location.long, y = location.lat),
-                  color = "yellow", alpha = 2, size = 1) +
-  geom_contour(data = turtle.dens, aes(x = Long, y = Lat, z = Density),
-               color = "pink2", size = 1) +   theme(legend.position = "bottom")
-#  coord_map("mercator")
+combined_turtle_data = cbind(turtle, magnetic_dta)
+tail(combined_turtle_data)
+library(solarPos)
 
-# Assuming your dataset is named 'turtle_data' and it has a column named 'date'
-sorted_turtle_data <- turte[order(turte$timestamp), ]
-head(sorted_turtle_data)
-tail(sorted_turtle_data)  
+combined_turtle_data$month <- format(combined_turtle_data$timestamp, "%m")
+combined_turtle_data$day <- format(combined_turtle_data$timestamp, "%d")
+
+combined_turtle_data$year = as.numeric(combined_turtle_data$year)
+combined_turtle_data$month = as.numeric(combined_turtle_data$month)
+combined_turtle_data$day = as.numeric(combined_turtle_data$day)
+
+
+combined_turtle_data$jd = solarPos::julianDay(
+  combined_turtle_data$year, combined_turtle_data$month, 
+  combined_turtle_data$day
+)
+
+x = solarPos::solarPosition(combined_turtle_data$jd,
+                            combined_turtle_data$location.long,
+                            combined_turtle_data$location.lat
+)
+head(x)
+x = data.frame(x)
+
+combined_turtle_data$solar_azimuth = x$azimuth
+combined_turtle_data$solar_zenith = x$zenith
+
+dim(combined_turtle_data)
+head(combined_turtle_data)
+
+for ( i in 1:10271) {
+  combined_turtle_data$del_solar_azimuth[i] = 
+    (combined_turtle_data$solar_azimuth[i+1] -  
+       combined_turtle_data$solar_azimuth[i])
+}
+
+for ( i in 1:10271) {
+  combined_turtle_data$del_solar_zenith[i] = 
+    (combined_turtle_data$solar_zenith[i+1] -  
+       combined_turtle_data$solar_zenith[i])
+}
+
+tail(combined_turtle_data)
+
+library(suncalc)
+data = data.frame(date = combined_turtle_data$timestamp
+                  , lat = combined_turtle_data$location.lat ,
+                  lon = combined_turtle_data$location.long)
+s = suncalc::getMoonPosition(data = data, keep = c("azimuth"))
+
+combined_turtle_data$moon_pos = s$azimuth
+
+for ( i in 1:10271) {
+  combined_turtle_data$del_lunar_azimuth[i] = 
+    (combined_turtle_data$moon_pos[i+1] -  
+       combined_turtle_data$moon_pos[i])
+}
+
+head(combined_turtle_data)
+tail(combined_turtle_data)
+
 
 get_initial_bearing <- function(longA, latA, longB, latB) {
   delta_long <- longB - longA
@@ -73,180 +205,118 @@ get_initial_bearing <- function(longA, latA, longB, latB) {
   return(bearing_degrees)
 }
 
-dim(turte)
-
 for ( i in 1:10271) {
-  sorted_turtle_data$theta[i] = 
-    get_initial_bearing(sorted_turtle_data$location.long[i] ,
-                        sorted_turtle_data$location.lat[i],
-                        sorted_turtle_data$location.long[i+1],
-                        sorted_turtle_data$location.lat[i+1] )
+  combined_turtle_data$theta[i] = 
+    get_initial_bearing(combined_turtle_data$location.long[i] ,
+                        combined_turtle_data$location.lat[i],
+                        combined_turtle_data$location.long[i+1],
+                        combined_turtle_data$location.lat[i+1] )
 }
 
-head(sorted_turtle_data)
-watson.test(sorted_turtle_data$theta, alpha = 0.01, dist = "vonmises")
+head(combined_turtle_data)
+tail(combined_turtle_data)
 
-
-library(ggplot2)
-library(ggforce)
-
-sampled_turtle = sorted_turtle_data[c(1:10, 100:110, 200:210, 300, 500:515, 1500, 2000, 
-                                      2500, 3000, 4500, 6000, 7000, 8000, 8500),]
-
-basemap(data = dt, bathymetry = TRUE, grid.col = "transparent", land.col = "green4") +
-  geom_segment(data = sorted_turtle_data,
-               aes(x = sorted_turtle_data$location.long,
-                   y = sorted_turtle_data$location.lat,
-                   xend = location.long + sin(theta * pi/180),
-                   yend = location.lat + cos(theta * pi/180)),
-               arrow = arrow(length = unit(0.1, "cm"), type = "closed", ends = "last"),
-               color = "red", size = 0)  +
-  geom_point(data = sampled_turtle, aes(x = location.long, y = location.lat), size = 5, 
-             color = "yellow", shape = 18) + # Add this line
-  geom_path(data = sampled_turtle,
-            aes(x = location.long, y = location.lat, xend = location.long + 
-                  sin(theta * pi/180),
-                yend = location.lat + cos(theta * pi/180),
-                color = "blue"),
-            arrow = arrow(length = unit(0.5, "cm"), type = "closed", ends = "last"),
-            size = 1 , col= "blue") +
-  theme(legend.position = "bottom")
-
-library(wmm)
-
-dim(sorted_turtle_data)
-sorted_turtle_data$h = 0
-
-sorted_turtle_data$timestamp <- as.Date(sorted_turtle_data$timestamp)
-
-sorted_turtle_data$year = format(sorted_turtle_data$timestamp, "%Y")
-sorted_turtle_data$year = as.numeric(sorted_turtle_data$year)
-
-# Convert the date string to a POSIXlt object
-date_obj <- as.POSIXlt(sorted_turtle_data$timestamp)
-
-# Extract the day of the year
-sorted_turtle_data$yearly_day <- date_obj$yday + 1
-
-
-sorted_turtle_data$yearly_date = sorted_turtle_data$yearly_day/365
-sorted_turtle_data$year = as.numeric(sorted_turtle_data$year)
-sorted_turtle_data$Annualized_time = (sorted_turtle_data$year + sorted_turtle_data$yearly_date)
-
-sorted_turtle_data$Annualized_time
-
-mag = list()
-for (i in 1:10271) {
-  mag[[i]] = data.frame(GetMagneticFieldWMM(lon = sorted_turtle_data$location.long[i], 
-                                            lat =  sorted_turtle_data$location.lat[i], 
-                                            height =  sorted_turtle_data$h[i], 
-                                            time =  sorted_turtle_data$Annualized_time[i], 
-                                            wmmVersion = "WMM2015"))
-}
-
-mage_data = data.frame(t(sapply(mag,c)))
-head(mage_data)
-magnetic_dta = mage_data[,c(1:3, 7:10)]
-head(magnetic_dta)
-
-combined_final_turtle_data = cbind(sorted_turtle_data, magnetic_dta)
-tail(combined_final_turtle_data)
-
-library(suncalc)
-
-data = data.frame(date = combined_final_turtle_data$timestamp
-                  , lat = combined_final_turtle_data$location.lat ,
-                  lon = combined_final_turtle_data$location.long)
-s = suncalc::getMoonPosition(data = data, keep = c("azimuth"))
-combined_final_turtle_data$moon_pos = s$azimuth
-
-library(solarPos)
-
-combined_final_turtle_data$month <- format(combined_final_turtle_data$timestamp, "%m")
-combined_final_turtle_data$day <- format(combined_final_turtle_data$timestamp, "%d")
-
-combined_final_turtle_data$year = as.numeric(combined_final_turtle_data$year)
-combined_final_turtle_data$month = as.numeric(combined_final_turtle_data$month)
-combined_final_turtle_data$day = as.numeric(combined_final_turtle_data$day)
-
-
-combined_final_turtle_data$jd = solarPos::julianDay(
-  combined_final_turtle_data$year, combined_final_turtle_data$month, 
-  combined_final_turtle_data$day
-)
-
-x = solarPos::solarPosition(combined_final_turtle_data$jd,
-                            combined_final_turtle_data$location.long,
-                            combined_final_turtle_data$location.lat
-)
-head(x)
-x = data.frame(x)
-
-combined_final_turtle_data$solar_azimuth = x$azimuth
-combined_final_turtle_data$solar_zenith = x$zenith
-
-dim(combined_final_turtle_data)
+combined_turtle_data$i = as.numeric(combined_turtle_data$i)
+combined_turtle_data$d = as.numeric(combined_turtle_data$d)
 
 for ( i in 1:10271) {
-  combined_final_turtle_data$del_solar_azimuth[i] = 
-    (combined_final_turtle_data$solar_azimuth[i+1] -  
-       combined_final_turtle_data$solar_azimuth[i])
+  combined_turtle_data$del_i[i] = 
+    (combined_turtle_data$i[i+1] -  
+       combined_turtle_data$i[i])
 }
 
 for ( i in 1:10271) {
-  combined_final_turtle_data$del_solar_zenith[i] = 
-    (combined_final_turtle_data$solar_zenith[i+1] -  
-       combined_final_turtle_data$solar_zenith[i])
+  combined_turtle_data$del_d[i] = 
+    (combined_turtle_data$d[i+1] -  
+       combined_turtle_data$d[i])
 }
 
-for ( i in 1:10271) {
-  combined_final_turtle_data$del_lunar_azimuth[i] = 
-    (combined_final_turtle_data$moon_pos[i+1] -  
-       combined_final_turtle_data$moon_pos[i])
-}
+head(combined_turtle_data)
+tail(combined_turtle_data)
 
-combined_final_turtle_data$i = as.numeric(combined_final_turtle_data$i)
-combined_final_turtle_data$d = as.numeric(combined_final_turtle_data$d)
+fit1 = lm.circular(combined_turtle_data$theta, combined_turtle_data$del_lunar_azimuth, type = "c-c")
+fit2 = lm.circular(combined_turtle_data$theta, combined_turtle_data$del_d, type = "c-c")
+fit3 = lm.circular(combined_turtle_data$theta, combined_turtle_data$del_i, type = "c-c")
+fit4 = lm.circular(combined_turtle_data$theta, combined_turtle_data$del_solar_azimuth, type = "c-c")
+fit5 = lm.circular(combined_turtle_data$theta, combined_turtle_data$del_solar_zenith, type = "c-c")
 
-for ( i in 1:10271) {
-  combined_final_turtle_data$del_i[i] = 
-    (combined_final_turtle_data$i[i+1] -  
-       combined_final_turtle_data$i[i])
-}
+fit1$rho
+fit2$rho
+fit3$rho
+fit4$rho
+fit5$rho
 
-for ( i in 1:10271) {
-  combined_final_turtle_data$del_d[i] = 
-    (combined_final_turtle_data$d[i+1] -  
-       combined_final_turtle_data$d[i])
-}
+watson.test(combined_turtle_data$location.long, alpha = 0.01, dist = "vonmises")
+watson.test(combined_turtle_data$location.lat, alpha = 0.01, dist = "vonmises")
+watson.test(combined_turtle_data$del_solar_azimuth, alpha = 0.01, dist = "vonmises")
+watson.test(combined_turtle_data$del_solar_zenith, alpha = 0.01, dist = "vonmises")
+watson.test(combined_turtle_data$del_lunar_azimuth, alpha = 0.01, dist = "vonmises")
+watson.test(combined_turtle_data$theta, alpha = 0.01, dist = "vonmises")
+watson.test(combined_turtle_data$del_i, alpha = 0.01, dist = "vonmises")
+watson.test(combined_turtle_data$del_d, alpha = 0.01, dist = "vonmises")
 
-head(combined_final_turtle_data)
-dim(combined_final_turtle_data)
-tail(combined_final_turtle_data)
+head(combined_turtle_data)
+dim(combined_turtle_data)
+tut = combined_turtle_data[,c(21,22,24,26,27)]
 
+tut = na.omit(tut)
 
-turtle3 = combined_final_turtle_data[1:1300,]
-turtle4 = combined_final_turtle_data[1301:2600,]
-turtle5 = combined_final_turtle_data[2601:3350,]
-turtle6 = combined_final_turtle_data[3450:4100,]
-turtle7 = combined_final_turtle_data[4101:4970,]
-turtle8 = combined_final_turtle_data[4971:5000,]
+library(FactoMineR)
+pca_result <- PCA(tut, graph = TRUE)
 
+pca_result$var$contrib
+pca_result$eig
 
-turtle12 = combined_final_turtle_data[7030:7500,]
-turtle11 = combined_final_turtle_data[7500:8200,]
+Dim1 = 0.2170757957*combined_turtle_data$del_solar_azimuth + 
+  0.3784609982*combined_turtle_data$del_solar_zenith + 
+  0.003482306 * combined_turtle_data$del_lunar_azimuth +
+  0.2541961067 * combined_turtle_data$del_i + 0.1499188688 * combined_turtle_data$del_d
 
+fit_dim1 = lm.circular(combined_turtle_data$theta, Dim1)  
+fit_dim1$rho  
 
+Dim2 = 0.38669821*combined_turtle_data$del_solar_azimuth + 
+  0.3269010*combined_turtle_data$del_solar_zenith + 
+  0.6297712 * combined_turtle_data$del_lunar_azimuth +
+  0.7595313  * combined_turtle_data$del_i + 0.44168144 * combined_turtle_data$del_d
+fit_dim2 = lm.circular(combined_turtle_data$theta, Dim2)  
+fit_dim2$rho  
 
-turtle10 = combined_final_turtle_data[8650:8700,]
-turtle9 = combined_final_turtle_data[8700:8900,]
-turtle2 = combined_final_turtle_data[8900:9100,]
-turtle1 = combined_final_turtle_data[9100:10270,]
+num_partitions <- 20
+combined_turtle_data = na.omit(combined_turtle_data)
+dim(combined_turtle_data)
+head(combined_turtle_data)
+# Create grid partitions based on longitude and latitude
+combined_turtle_data$longitude_partition <- cut(combined_turtle_data$location.long, breaks = num_partitions)
+combined_turtle_data$latitude_partition <- cut(combined_turtle_data$location.lat, breaks = num_partitions)
 
+# Group by grid partitions and calculate mean of parameters
+grid_mean_data <- combined_turtle_data %>%
+  group_by(longitude_partition, latitude_partition) %>%
+  summarise(
+    mean_longitude = circ.mean(location.long),
+    mean_latitude = circ.mean(location.lat),
+    mean_direction = circ.mean(theta),
+    mean_del_i = circ.mean(del_i),
+    mean_del_d = circ.mean(del_d),
+    mean_del_lunar_azimuth = circ.mean(del_lunar_azimuth),
+    mean_del_solar_zenith = circ.mean(del_solar_zenith),
+    mean_del_solar_azimuth = circ.mean(del_solar_azimuth)
+  )
 
+# Print the new dataset with mean values for each grid
+print(grid_mean_data)
+grid_mean_data_turtle = data.frame(grid_mean_data)
 
+head(grid_mean_data_turtle)
 
-
-
-watson.test(turtle13$theta, alpha = 0.01, dist = "vonmises")
-
+dir_1 = lm.circular(grid_mean_data_turtle$mean_direction, grid_mean_data_turtle$mean_del_i)
+dir_1$rho
+dir_2 = lm.circular(grid_mean_data_turtle$mean_direction, grid_mean_data_turtle$mean_del_d)
+dir_2$rho
+dir_3 = lm.circular(grid_mean_data_turtle$mean_direction, grid_mean_data_turtle$mean_del_lunar_azimuth)
+dir_3$rho
+dir_4 = lm.circular(grid_mean_data_turtle$mean_direction, grid_mean_data_turtle$mean_del_solar_zenith)
+dir_4$rho
+dir_5 = lm.circular(grid_mean_data_turtle$mean_direction, grid_mean_data_turtle$mean_del_solar_azimuth)
+dir_5$rho
